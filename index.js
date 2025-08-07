@@ -109,7 +109,7 @@ function renderOrderDetails(order, title = 'Order') {
          `📍 Location: ${escapeHTML(order.location)}\n` +
          (notes ? `📝 Notes: ${notes}\n` : '') +
          `💳 Payment: ${order.payment.charAt(0).toUpperCase() + order.payment.slice(1)}\n` +
-         `🚗 Driver: ${driverLink}`;
+         `🏍️ Driver: ${driverLink}`;
 }
 
 // Admin menus
@@ -117,7 +117,7 @@ function adminMainMenuKeyboard() {
   return {
     inline_keyboard: [
       [{ text: '📝 Orders', callback_data: 'admin_orders_menu' }],
-      [{ text: '🚗 Connected Drivers', callback_data: 'admin_connected_drivers' }],
+      [{ text: '🏍️ Connected Drivers', callback_data: 'admin_connected_drivers' }],
     ],
   };
 }
@@ -136,7 +136,7 @@ function ordersMenuKeyboard() {
 function draftOrderListKeyboard(drafts) {
   const rows = drafts.length ? drafts.map(o => ([
     { text: `✏️ Edit #${o.orderNumber}`, callback_data: `admin_edit_draft_${o.orderNumber}` },
-    { text: `🗑️ Delete #${o.orderNumber}`, callback_data: `admin_delete_draft_${o.orderNumber}` },
+    { text: `❌ Delete #${o.orderNumber}`, callback_data: `admin_delete_draft_${o.orderNumber}` },
   ])) : [[{ text: 'No draft orders', callback_data: 'noop' }]];
   rows.push([{ text: '🔙 Back', callback_data: 'admin_orders_menu' }]);
   return { inline_keyboard: rows };
@@ -167,8 +167,8 @@ function orderEditKeyboard(order) {
       [{ text: '📍 Set Location', callback_data: `edit_location_${order.orderNumber}` }],
       [{ text: `💳 Payment: ${order.payment.charAt(0).toUpperCase() + order.payment.slice(1)}`, callback_data: `edit_payment_${order.orderNumber}` }],
       [{ text: '📝 Add Notes', callback_data: `edit_notes_${order.orderNumber}` }],
-      [{ text: '✅ Create Order', callback_data: `confirm_order_${order.orderNumber}` }],
-      [{ text: '🗑️ Delete Order', callback_data: `delete_order_${order.orderNumber}` }],
+      [{ text: '✅ Assign to driver', callback_data: `confirm_order_${order.orderNumber}` }],
+      [{ text: '❌ Delete Order', callback_data: `delete_order_${order.orderNumber}` }],
       [{ text: '🔙 Back', callback_data: 'admin_orders_menu' }],
     ],
   };
@@ -214,7 +214,7 @@ async function showDraftOrders(chatId) {
 
 async function showActiveOrders(chatId) {
   const actives = Array.from(activeOrders.values());
-  await sendTelegramMessage(chatId, `📋 <b>Active Orders (${actives.length}):</b>`, activeOrderListKeyboard(actives));
+  await sendTelegramMessage(chatId, `📦 <b>Active Orders (${actives.length}):</b>`, activeOrderListKeyboard(actives));
 }
 
 async function showCompletedOrders(chatId) {
@@ -224,7 +224,7 @@ async function showCompletedOrders(chatId) {
 
 async function showConnectedDrivers(chatId) {
   if (connectedDrivers.size === 0) {
-    await sendTelegramMessage(chatId, '🚗 No drivers connected.');
+    await sendTelegramMessage(chatId, '🏍️ No drivers connected.');
     return;
   }
   const list = Array.from(connectedDrivers.values()).map(u => tgUserLink(u)).join('\n');
@@ -280,11 +280,11 @@ Deno.serve(async (req) => {
 
         if(textLower === '/connect') {
           if(connectedDrivers.has(userId)) {
-            await sendTelegramMessage(chatId, '🚗 You are already connected.');
+            await sendTelegramMessage(chatId, '🏍️ You are already connected.');
           } else {
             connectedDrivers.set(userId, { id: userId, first_name: msg.from.first_name, username: msg.from.username });
             await sendTelegramMessage(chatId, '✅ You are now connected.');
-            await notifyAdmins(`🚗 Driver ${tgUserLink(msg.from)} connected.`);
+            await notifyAdmins(`🏍️ Driver ${tgUserLink(msg.from)} connected.`);
           }
           return new Response('OK', { headers: corsHeaders });
         }
@@ -294,7 +294,7 @@ Deno.serve(async (req) => {
           } else {
             connectedDrivers.delete(userId);
             await sendTelegramMessage(chatId, '✅ You are now disconnected.');
-            await notifyAdmins(`🚗 Driver ${tgUserLink(msg.from)} disconnected.`);
+            await notifyAdmins(`🏍️ Driver ${tgUserLink(msg.from)} disconnected.`);
           }
           return new Response('OK', { headers: corsHeaders });
         }
@@ -307,7 +307,7 @@ Deno.serve(async (req) => {
       // Admin commands & forwarding for new order creation
       if(isAdmin(userId)) {
         if(text.toLowerCase() === '/start') {
-          await sendTelegramMessage(chatId, '👑 <b>Admin Panel</b>', adminMainMenuKeyboard());
+          await sendTelegramMessage(chatId, '<b>Admin Panel</b>', adminMainMenuKeyboard());
           return new Response('OK', { headers: corsHeaders });
         }
 
@@ -349,7 +349,7 @@ Deno.serve(async (req) => {
           const keyboard = {
             inline_keyboard: [
               [{ text: '💳 Set Payment', callback_data: `edit_payment_${orderNumber}` }],
-              [{ text: '✅ Create Order', callback_data: `confirm_order_${orderNumber}` }],
+              [{ text: '✅ Assign to driver', callback_data: `confirm_order_${orderNumber}` }],
             ],
           };
 
@@ -400,7 +400,7 @@ Deno.serve(async (req) => {
 
       // Handle main menus & submenus
       if(data === 'admin_main_menu') {
-        await sendTelegramMessage(chatId, '👑 <b>Admin Panel</b>', adminMainMenuKeyboard());
+        await sendTelegramMessage(chatId, ' <b>Admin Panel</b>', adminMainMenuKeyboard());
         await answerCallbackQuery(callbackQueryId);
         return new Response('OK', { headers: corsHeaders });
       }
@@ -535,11 +535,11 @@ Deno.serve(async (req) => {
           return new Response('OK', { headers: corsHeaders });
         }
         const driversArr = Array.from(connectedDrivers.values()).map(driver => ([
-          { text: `🚗 ${tgUserLink(driver)}`, callback_data: `assign_driver_${orderNumber}_${driver.id}` }
+          { text: `🏍️ ${tgUserLink(driver)}`, callback_data: `assign_driver_${orderNumber}_${driver.id}` }
         ]));
         driversArr.push([{ text: '🔙 Back to Edit', callback_data: `back_order_${orderNumber}` }]);
         await editMessageText(chatId, messageId,
-          `🚗 <b>Select Driver for Order #${orderNumber}:</b>\n\n` +
+          `🏍️ <b>Select Driver for Order #${orderNumber}:</b>\n\n` +
           `👤 Customer ID: <code>${order.customerId}</code>\n` +
           `📍 Location: ${escapeHTML(order.location)}\n` +
           `💳 Payment: ${order.payment.charAt(0).toUpperCase() + order.payment.slice(1)}\n` +
