@@ -1,9 +1,9 @@
-// Database-Free Delivery Bot fully integrated with driver group connect/disconnect
+// Database-Free Delivery Bot with full admin and driver group support
 // Run with Deno
 
 const TELEGRAM_BOT_TOKEN = '8300808943:AAEeQsBOOjQ4XhuNNWe40C5c86kIZFMvzZM';
-const DRIVER_GROUP_ID = -2734011708; // Replace with actual driver group chat ID
-const ADMIN_USER_IDS = [5186573916]; // Admin Telegram user IDs
+const DRIVER_GROUP_ID = -2734011708; // Your driver group chat ID
+const ADMIN_USER_IDS = [5186573916]; // Telegram user IDs of admins
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -43,13 +43,9 @@ async function sendTelegramMessage(chatId, text, replyMarkup = null, disableWebP
   const body = { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: disableWebPagePreview };
   if (replyMarkup) body.reply_markup = replyMarkup;
   const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
   });
-  if (!resp.ok) {
-    console.error('Telegram sendMessage error:', await resp.text());
-  }
+  if (!resp.ok) console.error('Telegram sendMessage error:', await resp.text());
   return resp.json();
 }
 
@@ -58,9 +54,7 @@ async function editMessageText(chatId, messageId, text, replyMarkup = null, disa
   const body = { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML', disable_web_page_preview: disableWebPagePreview };
   if (replyMarkup) body.reply_markup = replyMarkup;
   const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
   });
   return resp.json();
 }
@@ -68,16 +62,13 @@ async function editMessageText(chatId, messageId, text, replyMarkup = null, disa
 async function answerCallbackQuery(callbackQueryId, text = '', showAlert = false) {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`;
   await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ callback_query_id: callbackQueryId, text, show_alert: showAlert })
   });
 }
 
 function tgUserLink(user) {
-  if (user.username) {
-    return `<a href="https://t.me/${user.username}">${user.first_name || 'User'}</a>`;
-  }
+  if (user.username) return `<a href="https://t.me/${user.username}">${user.first_name || 'User'}</a>`;
   return `<a href="tg://user?id=${user.id}">${user.first_name || 'User'}</a>`;
 }
 
@@ -145,9 +136,7 @@ async function showActiveOrders(chatId) {
   }
   let text = `<b>Active Orders (${orders.length}):</b>\n\n`;
   for (const o of orders) {
-    text += `📦 #${o.orderNumber} - <b>${o.status}</b>\n` +
-      `👤 Customer ID: <code>${o.customerId}</code>\n` +
-      `📍 Location: ${o.location}\n\n`;
+    text += `📦 #${o.orderNumber} - <b>${o.status}</b>\n` + `👤 Customer ID: <code>${o.customerId}</code>\n` + `📍 Location: ${o.location}\n\n`;
   }
   await sendTelegramMessage(chatId, text);
 }
@@ -160,8 +149,7 @@ async function showRecentOrders(chatId) {
   }
   let text = '<b>Recent Completed Orders:</b>\n\n';
   for (const o of recent) {
-    text += `📦 #${o.orderNumber} - Completed\n👤 Customer ID: <code>${o.customerId}</code>\n` +
-      `⏰ ${o.timestamps.completed.toLocaleString()}\n\n`;
+    text += `📦 #${o.orderNumber} - Completed\n👤 Customer ID: <code>${o.customerId}</code>\n` + `⏰ ${o.timestamps.completed.toLocaleString()}\n\n`;
   }
   await sendTelegramMessage(chatId, text);
 }
@@ -304,7 +292,7 @@ async function cancelOrder(orderNumber, chatId, messageId) {
 async function handleDriverGroupMessage(message) {
   const chatId = message.chat.id;
   const userId = message.from.id;
-  const text = message.text?.toLowerCase();
+  const text = (message.text || '').toLowerCase().trim();
 
   if (chatId !== DRIVER_GROUP_ID) return;
 
@@ -350,7 +338,6 @@ Deno.serve(async (req) => {
   try {
     const update = await req.json();
 
-    // Handle forwarded message from admin: create order draft
     if (update.message) {
       const message = update.message;
       const chatId = message.chat.id;
@@ -362,69 +349,65 @@ Deno.serve(async (req) => {
         return new Response('OK', { headers: corsHeaders });
       }
 
-      if (
-        isAdmin(userId) &&
-        message.forward_from &&
-        chatId > 0 &&
-        message.forward_from.id !== userId
-      ) {
-        const customerUser = message.forward_from;
-        const customerId = customerUser.id;
-
-        const lines = text.trim().split('\n');
-        let location = lines[0];
-        let notes = '';
-        if (lines.length > 1) notes = lines.slice(1).join('\n').trim();
-
-        const orderNumber = generateOrderNumber();
-        const newOrder = {
-          orderNumber,
-          customerId,
-          location,
-          payment: PAYMENT_TYPES.CASH,
-          notes,
-          status: ORDER_STATUS.CREATED,
-          driverId: null,
-          adminId: userId,
-          timestamps: { created: new Date() },
-          waitingFor: null,
-          editMessageId: null
-        };
-
-        activeOrders.set(orderNumber, newOrder);
-
-        const orderText = `📦 <b>New Order Draft #${orderNumber}</b>\n\n` +
-          `👤 Customer: ${tgUserLink(customerUser)}\n` +
-          `📍 Location: ${location}\n` +
-          (notes ? `📝 Notes: ${notes}\n` : '') +
-          `<b>Choose an action:</b>`;
-
-        const keyboard = {
-          inline_keyboard: [
-            [{ text: '💳 Set Payment', callback_data: `edit_payment_${orderNumber}` }],
-            [{ text: '✅ Create Order', callback_data: `confirm_order_${orderNumber}` }]
-          ]
-        };
-
-        const sent = await sendTelegramMessage(chatId, orderText, keyboard, true);
-        newOrder.editMessageId = sent.result.message_id;
-
-        return new Response('OK', { headers: corsHeaders });
-      }
-
       if (isAdmin(userId)) {
+        if (text.trim() === '/start') {
+          await showAdminMenu(chatId);
+          return new Response('OK', { headers: corsHeaders });
+        }
+
+        // Forwarded message for order creation
+        if (message.forward_from && message.forward_from.id !== userId) {
+          const customerUser = message.forward_from;
+          const customerId = customerUser.id;
+
+          const lines = text.trim().split('\n');
+          let location = lines[0];
+          let notes = '';
+          if (lines.length > 1) notes = lines.slice(1).join('\n').trim();
+
+          const orderNumber = generateOrderNumber();
+          const newOrder = {
+            orderNumber,
+            customerId,
+            location,
+            payment: PAYMENT_TYPES.CASH,
+            notes,
+            status: ORDER_STATUS.CREATED,
+            driverId: null,
+            adminId: userId,
+            timestamps: { created: new Date() },
+            waitingFor: null,
+            editMessageId: null
+          };
+
+          activeOrders.set(orderNumber, newOrder);
+
+          const orderText = `📦 <b>New Order Draft #${orderNumber}</b>\n\n` +
+            `👤 Customer: ${tgUserLink(customerUser)}\n` +
+            `📍 Location: ${location}\n` +
+            (notes ? `📝 Notes: ${notes}\n` : '') +
+            `<b>Choose an action:</b>`;
+
+          const keyboard = {
+            inline_keyboard: [
+              [{ text: '💳 Set Payment', callback_data: `edit_payment_${orderNumber}` }],
+              [{ text: '✅ Create Order', callback_data: `confirm_order_${orderNumber}` }]
+            ]
+          };
+
+          const sent = await sendTelegramMessage(chatId, orderText, keyboard, true);
+          newOrder.editMessageId = sent.result.message_id;
+
+          return new Response('OK', { headers: corsHeaders });
+        }
+
+        // Admin input for waitingFor fields
         for (const [orderNumber, order] of activeOrders.entries()) {
           if (order.adminId === userId && order.waitingFor) {
             switch (order.waitingFor) {
-              case 'customer':
-                order.customerId = parseInt(text) || text;
-                break;
-              case 'location':
-                order.location = text;
-                break;
-              case 'notes':
-                order.notes = text;
-                break;
+              case 'customer': order.customerId = parseInt(text) || text; break;
+              case 'location': order.location = text; break;
+              case 'notes': order.notes = text; break;
             }
             order.waitingFor = null;
             await updateOrderDisplay(chatId, order.editMessageId, orderNumber);
@@ -432,6 +415,7 @@ Deno.serve(async (req) => {
           }
         }
       }
+
       return new Response('OK', { headers: corsHeaders });
     }
 
@@ -443,7 +427,6 @@ Deno.serve(async (req) => {
       const chatId = message.chat.id;
       const messageId = message.message_id;
 
-      // Driver group callback handling for connect/disconnect
       if (chatId === DRIVER_GROUP_ID) {
         if (data === 'driver_connect') {
           if (!connectedDrivers.has(userId)) {
@@ -453,11 +436,12 @@ Deno.serve(async (req) => {
               await sendTelegramMessage(adminId, `🚗 Driver ${userId} connected.`);
             }
           } else {
-            await sendTelegramMessage(chatId, '🚗 Already connected.', driverStatusKeyboard(userId));
+            await sendTelegramMessage(chatId, '🚗 You are already connected.', driverStatusKeyboard(userId));
           }
           await answerCallbackQuery(callbackQueryId);
           return new Response('OK', { headers: corsHeaders });
-        } else if (data === 'driver_disconnect') {
+        }
+        if (data === 'driver_disconnect') {
           if (connectedDrivers.delete(userId)) {
             await sendTelegramMessage(chatId, '✅ You are now disconnected.', driverStatusKeyboard(userId));
             for (const adminId of ADMIN_USER_IDS) {
@@ -471,66 +455,72 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Admin callback query handling
       if (!isAdmin(userId)) {
         await answerCallbackQuery(callbackQueryId, 'Unauthorized', true);
         return new Response('OK', { headers: corsHeaders });
       }
 
-      switch (data) {
-        case 'admin_create_order':
+      switch (true) {
+        case data === 'admin_create_order':
           await startOrderCreation(chatId, userId);
           await answerCallbackQuery(callbackQueryId, 'Starting new order...');
           break;
-        case 'admin_active_orders':
+        case data === 'admin_active_orders':
           await showActiveOrders(chatId);
           await answerCallbackQuery(callbackQueryId);
           break;
-        case 'admin_connected_drivers':
+        case data === 'admin_connected_drivers':
           await showConnectedDrivers(chatId);
           await answerCallbackQuery(callbackQueryId);
           break;
-        case 'admin_recent_orders':
+        case data === 'admin_recent_orders':
           await showRecentOrders(chatId);
           await answerCallbackQuery(callbackQueryId);
           break;
-        default: {
-          if (data.startsWith('edit_')) {
-            const [_, field, orderNumber] = data.split('_');
-            await handleOrderEdit(field, orderNumber, chatId, userId, messageId);
-            if (field === 'payment') {
-              await answerCallbackQuery(callbackQueryId);
-            } else {
-              await answerCallbackQuery(callbackQueryId, `Ready to enter ${field}.`);
-            }
-          } else if (data.startsWith('set_payment_')) {
-            const [, , orderNumber, payment] = data.split('_');
-            await handlePaymentSet(orderNumber, payment, chatId, messageId, userId);
-            await answerCallbackQuery(callbackQueryId, `Payment set to ${payment}`);
-          } else if (data.startsWith('back_order_')) {
-            const orderNumber = data.split('_')[2];
-            await updateOrderDisplay(chatId, messageId, orderNumber);
-            await answerCallbackQuery(callbackQueryId, 'Back to order edit.');
-          } else if (data.startsWith('confirm_order_')) {
-            const orderNumber = data.split('_')[2];
-            await confirmOrder(orderNumber, chatId, messageId);
-            await answerCallbackQuery(callbackQueryId);
-          } else if (data.startsWith('cancel_order_')) {
-            const orderNumber = data.split('_')[2];
-            await cancelOrder(orderNumber, chatId, messageId);
-            await answerCallbackQuery(callbackQueryId, 'Order cancelled.');
-          } else if (data.startsWith('assign_driver_')) {
-            const [, , orderNumber, driverIdStr] = data.split('_');
-            const driverId = parseInt(driverIdStr);
-            await assignDriverToOrder(orderNumber, driverId, chatId, messageId);
-            await answerCallbackQuery(callbackQueryId, 'Driver assigned.');
-          } else {
-            await answerCallbackQuery(callbackQueryId);
-          }
+        case data.startsWith('edit_'): {
+          const [_, field, orderNumber] = data.split('_');
+          await handleOrderEdit(field, orderNumber, chatId, userId, messageId);
+          if (field === 'payment') await answerCallbackQuery(callbackQueryId);
+          else await answerCallbackQuery(callbackQueryId, `Ready to enter ${field}.`);
+          break;
         }
+        case data.startsWith('set_payment_'): {
+          const [, , orderNumber, payment] = data.split('_');
+          await handlePaymentSet(orderNumber, payment, chatId, messageId, userId);
+          await answerCallbackQuery(callbackQueryId, `Payment set to ${payment}`);
+          break;
+        }
+        case data.startsWith('back_order_'): {
+          const orderNumber = data.split('_')[2];
+          await updateOrderDisplay(chatId, messageId, orderNumber);
+          await answerCallbackQuery(callbackQueryId, 'Back to order edit.');
+          break;
+        }
+        case data.startsWith('confirm_order_'): {
+          const orderNumber = data.split('_')[2];
+          await confirmOrder(orderNumber, chatId, messageId);
+          await answerCallbackQuery(callbackQueryId);
+          break;
+        }
+        case data.startsWith('cancel_order_'): {
+          const orderNumber = data.split('_')[2];
+          await cancelOrder(orderNumber, chatId, messageId);
+          await answerCallbackQuery(callbackQueryId, 'Order cancelled.');
+          break;
+        }
+        case data.startsWith('assign_driver_'): {
+          const [, , orderNumber, driverIdStr] = data.split('_');
+          const driverId = parseInt(driverIdStr);
+          await assignDriverToOrder(orderNumber, driverId, chatId, messageId);
+          await answerCallbackQuery(callbackQueryId, 'Driver assigned.');
+          break;
+        }
+        default:
+          await answerCallbackQuery(callbackQueryId);
       }
       return new Response('OK', { headers: corsHeaders });
     }
+
     return new Response('OK', { headers: corsHeaders });
   } catch (e) {
     console.error('Error processing update:', e);
