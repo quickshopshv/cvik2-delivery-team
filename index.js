@@ -1,7 +1,7 @@
 // Full Delivery Bot with stable admin panel, order draft, driver buttons, feedback, timers
 // Run with Deno Deploy or similar environment
 
-const TELEGRAM_BOT_TOKEN = 'YOUR_BOT_TOKEN_HERE';
+const TELEGRAM_BOT_TOKEN = '8300808943:AAEeQsBOOjQ4XhuNNWe40C5c86kIZFMvzZM';
 const ADMIN_USER_IDS = [5186573916];  // Replace with your Telegram user ID(s)
 
 const corsHeaders = {
