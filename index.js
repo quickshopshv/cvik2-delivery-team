@@ -1,41 +1,41 @@
-// Delivery Bot with driver buttons, payment flow fixes, timers, and feedback
-// Adjusted and debugged last full version (after your last feedback)
-// Run with Deno
+// Full Delivery Bot with stable admin panel, order draft, driver buttons, feedback, timers
+// Run with Deno Deploy or similar environment
 
-const TELEGRAM_BOT_TOKEN = '8300808943:AAEeQsBOOjQ4XhuNNWe40C5c86kIZFMvzZM';
-const ADMIN_USER_IDS = [5186573916];
+const TELEGRAM_BOT_TOKEN = 'YOUR_BOT_TOKEN_HERE';
+const ADMIN_USER_IDS = [5186573916];  // Replace with your Telegram user ID(s)
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// --- Data stores ---
-const activeOrders = new Map();
-const completedOrders = [];
+const activeOrders = new Map();    // orderNumber -> order object
+const completedOrders = [];        // list of completed orders for history/log
 const connectedDrivers = new Set();
 
-// --- Constants ---
 const ORDER_STATUS = {
   CREATED: 'created',
   ASSIGNED: 'assigned',
   PICKED_UP: 'picked_up',
   ARRIVED: 'arrived',
-  COMPLETED: 'completed'
+  COMPLETED: 'completed',
 };
 
 const PAYMENT_TYPES = {
   CASH: 'cash',
   QRCODE: 'qrcode',
-  PAID: 'paid'
+  PAID: 'paid',
 };
 
 let orderCounter = 1;
-const pickupTimers = new Map();       // orderNumber => TimeoutId
-const feedbackSessions = new Map();   // driverId => orderNumber
-const feedbackNotesWaiting = new Map(); // driverId => orderNumber
 
-// --- Helpers ---
+// Pickup timers: orderNumber -> TimeoutId
+const pickupTimers = new Map();
+// Feedback sessions: driverId -> orderNumber
+const feedbackSessions = new Map();
+// Waiting for driver feedback notes: driverId -> orderNumber
+const feedbackNotesWaiting = new Map();
+
 function isAdmin(userId) {
   return ADMIN_USER_IDS.includes(userId);
 }
@@ -46,11 +46,7 @@ function generateOrderNumber() {
 
 function escapeHTML(text) {
   if (!text) return '';
-  return text.replace(/&/g, '&amp;')
-             .replace(/</g, '&lt;')
-             .replace(/>/g, '&gt;')
-             .replace(/"/g, '&quot;')
-             .replace(/'/g, '&#039;');
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
 function tgUserLink(user) {
@@ -65,17 +61,20 @@ async function sendTelegramMessage(chatId, text, replyMarkup = null, disableWebP
     chat_id: chatId,
     text,
     parse_mode: 'HTML',
-    disable_web_page_preview: disableWebPagePreview
+    disable_web_page_preview: disableWebPagePreview,
   };
   if (replyMarkup) body.reply_markup = replyMarkup;
+
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   });
+
   if (!resp.ok) {
     console.error('Telegram sendMessage error:', await resp.text());
   }
+
   return resp.json();
 }
 
@@ -86,14 +85,16 @@ async function editMessageText(chatId, messageId, text, replyMarkup = null, disa
     message_id: messageId,
     text,
     parse_mode: 'HTML',
-    disable_web_page_preview: disableWebPagePreview
+    disable_web_page_preview: disableWebPagePreview,
   };
   if (replyMarkup) body.reply_markup = replyMarkup;
+
   const resp = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   });
+
   return resp.json();
 }
 
@@ -102,19 +103,19 @@ async function answerCallbackQuery(callbackQueryId, text = '', showAlert = false
   await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ callback_query_id: callbackQueryId, text, show_alert: showAlert })
+    body: JSON.stringify({ callback_query_id: callbackQueryId, text, show_alert: showAlert }),
   });
 }
 
 function renderOrderDetails(order, title = 'Order', customerUser = null, driverUser = null) {
   const customerNameLink = customerUser ? tgUserLink(customerUser) : `<code>${order.customerId}</code>`;
-  const notesText = order.notes && order.notes.trim() ? order.notes : '';
+  const notesText = order.notes && order.notes.trim() !== '' ? order.notes : '';
   return `📦 <b>${title} #${order.orderNumber}</b>\n\n` +
-         `👤 Customer: ${customerNameLink}\n` +
-         `📍 Location: ${escapeHTML(order.location)}\n` +
-         (notesText ? `📝 Notes: ${escapeHTML(notesText)}\n` : '') +
-         `💳 Payment: ${order.payment.charAt(0).toUpperCase() + order.payment.slice(1)}\n` +
-         (driverUser ? `🚗 Driver: ${tgUserLink(driverUser)}\n` : '');
+    `👤 Customer: ${customerNameLink}\n` +
+    `📍 Location: ${escapeHTML(order.location)}\n` +
+    (notesText ? `📝 Notes: ${escapeHTML(notesText)}\n` : '') +
+    `💳 Payment: ${order.payment.charAt(0).toUpperCase() + order.payment.slice(1)}\n` +
+    (driverUser ? `🚗 Driver: ${tgUserLink(driverUser)}\n` : '');
 }
 
 function adminMainMenuKeyboard() {
@@ -123,8 +124,8 @@ function adminMainMenuKeyboard() {
       [{ text: '📦 Create New Order', callback_data: 'admin_create_order' }],
       [{ text: '📋 Active Orders', callback_data: 'admin_active_orders' }],
       [{ text: '🚗 Connected Drivers', callback_data: 'admin_connected_drivers' }],
-      [{ text: '📊 Recent Orders', callback_data: 'admin_recent_orders' }]
-    ]
+      [{ text: '📊 Recent Orders', callback_data: 'admin_recent_orders' }],
+    ],
   };
 }
 
@@ -136,8 +137,8 @@ function orderEditKeyboard(order) {
       [{ text: `💳 Payment: ${order.payment.charAt(0).toUpperCase() + order.payment.slice(1)}`, callback_data: `edit_payment_${order.orderNumber}` }],
       [{ text: '📝 Add Notes', callback_data: `edit_notes_${order.orderNumber}` }],
       [{ text: '✅ Create Order', callback_data: `confirm_order_${order.orderNumber}` }],
-      [{ text: '❌ Cancel', callback_data: `cancel_order_${order.orderNumber}` }]
-    ]
+      [{ text: '❌ Cancel', callback_data: `cancel_order_${order.orderNumber}` }],
+    ],
   };
 }
 
@@ -147,8 +148,8 @@ function driverOrderButtons(orderNumber) {
       [{ text: '🚚 Pickup', callback_data: `pickup_${orderNumber}` }],
       [{ text: '📢 Notify', callback_data: `notify_${orderNumber}` }],
       [{ text: '📍 Arrived', callback_data: `arrived_${orderNumber}` }],
-      [{ text: '✅ Completed', callback_data: `completed_${orderNumber}` }]
-    ]
+      [{ text: '✅ Completed', callback_data: `completed_${orderNumber}` }],
+    ],
   };
 }
 
@@ -174,6 +175,7 @@ async function notifyAdmins(text) {
   }
 }
 
+// Main webhook handler
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
   if (req.method === 'GET') return new Response('Delivery Bot Running', { headers: corsHeaders });
@@ -181,6 +183,7 @@ Deno.serve(async (req) => {
   try {
     const update = await req.json();
 
+    // MESSAGE handling
     if (update.message) {
       const msg = update.message;
       const chatId = msg.chat.id;
@@ -188,11 +191,11 @@ Deno.serve(async (req) => {
       const textRaw = msg.text || '';
       const text = textRaw.trim();
 
-      // Drivers connect/disconnect/status in private chat only
-      if(chatId > 0 && !isAdmin(userId)) {
-        const txt = text.toLowerCase();
-        if(txt === '/connect') {
-          if(connectedDrivers.has(userId)) {
+      // Driver connect/disconnect/status commands (private chat only)
+      if (chatId > 0 && !isAdmin(userId)) {
+        const textLower = text.toLowerCase();
+        if (textLower === '/connect') {
+          if (connectedDrivers.has(userId)) {
             await sendTelegramMessage(chatId, '🚗 You are already connected.');
           } else {
             connectedDrivers.add(userId);
@@ -201,8 +204,8 @@ Deno.serve(async (req) => {
           }
           return new Response('OK', { headers: corsHeaders });
         }
-        if(txt === '/disconnect') {
-          if(!connectedDrivers.has(userId)) {
+        if (textLower === '/disconnect') {
+          if (!connectedDrivers.has(userId)) {
             await sendTelegramMessage(chatId, 'ℹ️ You were not connected.');
           } else {
             connectedDrivers.delete(userId);
@@ -211,22 +214,20 @@ Deno.serve(async (req) => {
           }
           return new Response('OK', { headers: corsHeaders });
         }
-        if(txt === '/status') {
-          const statusMsg = connectedDrivers.has(userId) ? '✅ You are connected.' : '❌ You are disconnected.';
-          await sendTelegramMessage(chatId, statusMsg);
+        if (textLower === '/status') {
+          await sendTelegramMessage(chatId, connectedDrivers.has(userId) ? '✅ You are connected.' : '❌ You are disconnected.');
           return new Response('OK', { headers: corsHeaders });
         }
       }
 
-      // Admin interface
-      if(isAdmin(userId)) {
-        if(text.toLowerCase() === '/start') {
+      // Admin commands & forwarding message to create orders
+      if (isAdmin(userId)) {
+        if (text.toLowerCase() === '/start') {
           await sendTelegramMessage(chatId, '👑 <b>Admin Panel</b>', adminMainMenuKeyboard());
           return new Response('OK', { headers: corsHeaders });
         }
 
-        // Forwarded message creates new order draft
-        if(msg.forward_from && msg.forward_from.id !== userId && chatId > 0) {
+        if (msg.forward_from && msg.forward_from.id !== userId && chatId > 0) {
           const customerUser = msg.forward_from;
           const customerId = customerUser.id;
           const lines = text.split('\n');
@@ -246,9 +247,10 @@ Deno.serve(async (req) => {
             waitingFor: null,
             editMessageId: null,
           };
+
           activeOrders.set(orderNumber, newOrder);
 
-          const orderText = 
+          const orderText =
             `📦 <b>New Order Draft #${orderNumber}</b>\n\n` +
             `👤 Customer: ${tgUserLink(customerUser)}\n` +
             `📍 Location: ${escapeHTML(location)}\n` +
@@ -260,7 +262,7 @@ Deno.serve(async (req) => {
             inline_keyboard: [
               [{ text: '💳 Set Payment', callback_data: `edit_payment_${orderNumber}` }],
               [{ text: '✅ Create Order', callback_data: `confirm_order_${orderNumber}` }],
-            ]
+            ],
           };
 
           const sent = await sendTelegramMessage(chatId, orderText, keyboard, true);
@@ -269,13 +271,19 @@ Deno.serve(async (req) => {
           return new Response('OK', { headers: corsHeaders });
         }
 
-        // Admin filling waiting input fields
-        for(let [orderNumber, order] of activeOrders.entries()) {
-          if(order.adminId === userId && order.waitingFor) {
-            switch(order.waitingFor) {
-              case 'customer': order.customerId = parseInt(text) || text; break;
-              case 'location': order.location = text; break;
-              case 'notes': order.notes = text; break;
+        // Admin input replies for waiting fields (customerId, location, notes)
+        for (const [orderNumber, order] of activeOrders.entries()) {
+          if (order.adminId === userId && order.waitingFor) {
+            switch (order.waitingFor) {
+              case 'customer':
+                order.customerId = parseInt(text) || text;
+                break;
+              case 'location':
+                order.location = text;
+                break;
+              case 'notes':
+                order.notes = text;
+                break;
             }
             order.waitingFor = null;
             await updateOrderDisplay(chatId, order.editMessageId, orderNumber);
@@ -286,25 +294,48 @@ Deno.serve(async (req) => {
       return new Response('OK', { headers: corsHeaders });
     }
 
-    if(update.callback_query){
+    // CALLBACK_QUERY handling
+    if (update.callback_query) {
       const data = update.callback_query.data;
       const callbackQueryId = update.callback_query.id;
-      const fromUser = update.callback_query.from;
-      const userId = fromUser.id;
+      const userId = update.callback_query.from.id;
       const message = update.callback_query.message;
       const chatId = message.chat.id;
       const messageId = message.message_id;
 
-      if(!isAdmin(userId)){
+      // Only admins can operate callback buttons here
+      if (!isAdmin(userId)) {
         await answerCallbackQuery(callbackQueryId, 'Unauthorized', true);
         return new Response('OK', { headers: corsHeaders });
       }
 
-      // Payment editing
-      if(data.startsWith('edit_payment_')){
+      // Handle admin menu buttons
+      if (data === 'admin_create_order') {
+        await startOrderCreation(chatId, userId);
+        await answerCallbackQuery(callbackQueryId, 'Starting new order...');
+        return new Response('OK', { headers: corsHeaders });
+      }
+      if (data === 'admin_active_orders') {
+        await showActiveOrders(chatId);
+        await answerCallbackQuery(callbackQueryId);
+        return new Response('OK', { headers: corsHeaders });
+      }
+      if (data === 'admin_connected_drivers') {
+        await showConnectedDrivers(chatId);
+        await answerCallbackQuery(callbackQueryId);
+        return new Response('OK', { headers: corsHeaders });
+      }
+      if (data === 'admin_recent_orders') {
+        await showRecentOrders(chatId);
+        await answerCallbackQuery(callbackQueryId);
+        return new Response('OK', { headers: corsHeaders });
+      }
+
+      // Handle order draft buttons and payment setting
+      if (data.startsWith('edit_payment_')) {
         const orderNumber = data.split('_')[2];
         const order = activeOrders.get(orderNumber);
-        if(!order || order.adminId !== userId){
+        if (!order || order.adminId !== userId) {
           await answerCallbackQuery(callbackQueryId, 'Order not found or permission denied.', true);
           return new Response('OK', { headers: corsHeaders });
         }
@@ -314,55 +345,55 @@ Deno.serve(async (req) => {
             [{ text: 'QR Code', callback_data: `set_payment_${orderNumber}_qrcode` }],
             [{ text: 'Paid', callback_data: `set_payment_${orderNumber}_paid` }],
             [{ text: '🔙 Back', callback_data: `back_order_${orderNumber}` }],
-          ]
+          ],
         };
         await editMessageText(chatId, messageId, `💳 <b>Select Payment Method for Order #${orderNumber}:</b>`, keyboard, true);
         await answerCallbackQuery(callbackQueryId);
         return new Response('OK', { headers: corsHeaders });
       }
 
-      if(data.startsWith('set_payment_')){
+      if (data.startsWith('set_payment_')) {
         const parts = data.split('_');
         const orderNumber = parts[2];
         const payment = parts[3];
         const order = activeOrders.get(orderNumber);
-        if(!order || order.adminId !== userId){
+        if (!order || order.adminId !== userId) {
           await answerCallbackQuery(callbackQueryId, 'Order not found or permission denied.', true);
           return new Response('OK', { headers: corsHeaders });
         }
-        if(!Object.values(PAYMENT_TYPES).includes(payment)){
+        if (!Object.values(PAYMENT_TYPES).includes(payment)) {
           await answerCallbackQuery(callbackQueryId, 'Invalid payment method.', true);
           return new Response('OK', { headers: corsHeaders });
         }
         order.payment = payment;
         order.waitingFor = null;
-        // Stay on draft view!
+        // Stay on draft view after setting payment
         await updateOrderDisplay(chatId, messageId, orderNumber);
         await answerCallbackQuery(callbackQueryId, `Payment set to ${payment}`);
         return new Response('OK', { headers: corsHeaders });
       }
 
-      // Confirm order and assign driver
-      if(data.startsWith('confirm_order_')){
+      if (data.startsWith('confirm_order_')) {
+        // Show connected drivers for assignment
         const orderNumber = data.split('_')[2];
         const order = activeOrders.get(orderNumber);
-        if(!order || order.adminId !== userId){
+        if (!order || order.adminId !== userId) {
           await answerCallbackQuery(callbackQueryId, 'Order not found or permission denied.', true);
           return new Response('OK', { headers: corsHeaders });
         }
-        if(!order.customerId || !order.location){
+        if (!order.customerId || !order.location) {
           await answerCallbackQuery(callbackQueryId, 'Please set Customer ID and Location first.', true);
           return new Response('OK', { headers: corsHeaders });
         }
-        if(connectedDrivers.size === 0){
-          await editMessageText(chatId, messageId, `❌ <b>No drivers connected currently.</b> Please ask drivers to connect.`);
+        if (connectedDrivers.size === 0) {
+          await editMessageText(chatId, messageId, `❌ <b>No drivers connected.</b> Please ask drivers to connect.`);
           await answerCallbackQuery(callbackQueryId);
           return new Response('OK', { headers: corsHeaders });
         }
         const driversArr = Array.from(connectedDrivers).map(driverId => [{ text: `🚗 Driver ${driverId}`, callback_data: `assign_driver_${orderNumber}_${driverId}` }]);
         driversArr.push([{ text: '🔙 Back to Edit', callback_data: `back_order_${orderNumber}` }]);
         const keyboard = { inline_keyboard: driversArr };
-        const orderInfo =
+        const orderInfo = 
           `🚗 <b>Select Driver for Order #${orderNumber}:</b>\n\n` +
           `👤 Customer ID: <code>${order.customerId}</code>\n` +
           `📍 Location: ${escapeHTML(order.location)}\n` +
@@ -373,23 +404,23 @@ Deno.serve(async (req) => {
         return new Response('OK', { headers: corsHeaders });
       }
 
-      if(data.startsWith('back_order_')){
+      if (data.startsWith('back_order_')) {
         const orderNumber = data.split('_')[2];
         await updateOrderDisplay(chatId, messageId, orderNumber);
         await answerCallbackQuery(callbackQueryId, 'Back to order edit.');
         return new Response('OK', { headers: corsHeaders });
       }
 
-      if(data.startsWith('assign_driver_')){
+      if (data.startsWith('assign_driver_')) {
         const parts = data.split('_');
         const orderNumber = parts[2];
-        const driverId = parseInt(parts[3]);
+        const driverId = parseInt(parts[3], 10);
         const order = activeOrders.get(orderNumber);
-        if(!order || order.adminId !== userId){
+        if (!order || order.adminId !== userId) {
           await answerCallbackQuery(callbackQueryId, 'Order not found or permission denied.', true);
           return new Response('OK', { headers: corsHeaders });
         }
-        if(!connectedDrivers.has(driverId)){
+        if (!connectedDrivers.has(driverId)) {
           await answerCallbackQuery(callbackQueryId, 'Driver not connected.', true);
           return new Response('OK', { headers: corsHeaders });
         }
@@ -400,11 +431,9 @@ Deno.serve(async (req) => {
         const driverUser = { id: driverId, first_name: `Driver ${driverId}` };
         const customerUser = null;
 
-        // Send the order to driver with the driver buttons
         await sendOrderToDriver(driverId, orderNumber);
 
-        // Inform admin
-        const adminText =
+        const adminSummary =
           `✅ <b>Order #${orderNumber} Created and Assigned!</b>\n\n` +
           `👤 Customer: ${tgUserLink(customerUser)}\n` +
           `📍 Location: ${escapeHTML(order.location)}\n` +
@@ -412,7 +441,8 @@ Deno.serve(async (req) => {
           (order.notes ? `📝 Notes: ${escapeHTML(order.notes)}\n` : '') +
           `🚗 Driver: ${tgUserLink(driverUser)}\n\n` +
           `Order sent to driver.`;
-        await editMessageText(chatId, messageId, adminText, null, true);
+
+        await editMessageText(chatId, messageId, adminSummary, null, true);
 
         activeOrders.delete(orderNumber);
 
@@ -420,17 +450,16 @@ Deno.serve(async (req) => {
         return new Response('OK', { headers: corsHeaders });
       }
 
-      // Driver action buttons (pickup, notify, arrived, completed)
-      // These handlers are consistent and implemented here:
+      // Driver action buttons (pickup, notify, arrived, completed) from last full version:
 
-      if(data.startsWith('pickup_')){
+      if (data.startsWith('pickup_')) {
         const orderNumber = data.split('_')[1];
         const order = Array.from(activeOrders.values()).find(o => o.orderNumber === orderNumber);
-        if(!order){
+        if (!order) {
           await answerCallbackQuery(callbackQueryId, 'Order not found', true);
           return new Response('OK', { headers: corsHeaders });
         }
-        if(order.driverId !== userId){
+        if (order.driverId !== userId) {
           await answerCallbackQuery(callbackQueryId, 'Only assigned driver can mark pickup.', true);
           return new Response('OK', { headers: corsHeaders });
         }
@@ -441,52 +470,47 @@ Deno.serve(async (req) => {
         await notifyAdmins(`📦 Order #${orderNumber} has been picked up by ${tgUserLink(update.callback_query.from)}`);
         await answerCallbackQuery(callbackQueryId, 'Pickup confirmed.');
 
-        // Start 20 min timer for late delivery notification
-        if(pickupTimers.has(orderNumber)) clearTimeout(pickupTimers.get(orderNumber));
+        if (pickupTimers.has(orderNumber)) clearTimeout(pickupTimers.get(orderNumber));
         const timerId = setTimeout(async () => {
-          await sendTelegramMessage(userId,
-            '⚠️ Late delivery detected.\n\n' +
-            '"The traffic is busier than usual, I am not far and will arrive shortly, thank you for understanding." (Please copy/send to customer if needed)');
+          await sendTelegramMessage(userId, '⚠️ Late delivery detected. Please notify customer if delay continues:\n"Traffic is busy; I will arrive shortly. Thanks for understanding."');
           pickupTimers.delete(orderNumber);
         }, 20 * 60 * 1000);
         pickupTimers.set(orderNumber, timerId);
 
-        // Update driver message (optional)
         const text = renderOrderDetails(order, 'Order Picked Up', null, update.callback_query.from);
         await editMessageText(chatId, messageId, text, driverOrderButtons(orderNumber), true);
 
         return new Response('OK', { headers: corsHeaders });
       }
 
-      if(data.startsWith('notify_')){
+      if (data.startsWith('notify_')) {
         const orderNumber = data.split('_')[1];
         const order = Array.from(activeOrders.values()).find(o => o.orderNumber === orderNumber);
-        if(!order){
+        if (!order) {
           await answerCallbackQuery(callbackQueryId, 'Order not found', true);
           return new Response('OK', { headers: corsHeaders });
         }
-        if(order.driverId !== userId){
+        if (order.driverId !== userId) {
           await answerCallbackQuery(callbackQueryId, 'Only assigned driver can notify customer.', true);
           return new Response('OK', { headers: corsHeaders });
         }
-        const notifyText = `Hi, here's ${escapeHTML(update.callback_query.from.first_name)} your meal is on the way and should be at your place within 20 minutes. See you soon!`;
-        await sendTelegramMessage(userId, `Copy this message and send to the customer:\n\n${notifyText}`);
+        const notifyText = `Hi, here's ${escapeHTML(update.callback_query.from.first_name)}, your meal is on the way and should be at your place within 20 minutes. See you soon!`;
+        await sendTelegramMessage(userId, `Copy and send this message to the customer:\n\n${notifyText}`);
         await answerCallbackQuery(callbackQueryId, 'Notification text sent.');
         return new Response('OK', { headers: corsHeaders });
       }
 
-      if(data.startsWith('arrived_')){
+      if (data.startsWith('arrived_')) {
         const orderNumber = data.split('_')[1];
         const order = Array.from(activeOrders.values()).find(o => o.orderNumber === orderNumber);
-        if(!order){
+        if (!order) {
           await answerCallbackQuery(callbackQueryId, 'Order not found', true);
           return new Response('OK', { headers: corsHeaders });
         }
-        if(order.driverId !== userId){
+        if (order.driverId !== userId) {
           await answerCallbackQuery(callbackQueryId, 'Only assigned driver can confirm arrival.', true);
           return new Response('OK', { headers: corsHeaders });
         }
-
         order.status = ORDER_STATUS.ARRIVED;
         order.timestamps.arrived = new Date();
 
@@ -495,29 +519,27 @@ Deno.serve(async (req) => {
         return new Response('OK', { headers: corsHeaders });
       }
 
-      if(data.startsWith('completed_')){
+      if (data.startsWith('completed_')) {
         const orderNumber = data.split('_')[1];
         const order = Array.from(activeOrders.values()).find(o => o.orderNumber === orderNumber);
-        if(!order){
+        if (!order) {
           await answerCallbackQuery(callbackQueryId, 'Order not found', true);
           return new Response('OK', { headers: corsHeaders });
         }
-        if(order.driverId !== userId){
+        if (order.driverId !== userId) {
           await answerCallbackQuery(callbackQueryId, 'Only assigned driver can complete order.', true);
           return new Response('OK', { headers: corsHeaders });
         }
         order.status = ORDER_STATUS.COMPLETED;
         order.timestamps.completed = new Date();
 
-        await notifyAdmins(`📦 Order #${orderNumber} marked completed by ${tgUserLink(update.callback_query.from)}`);
+        await notifyAdmins(`📦 Order #${orderNumber} marked as completed by ${tgUserLink(update.callback_query.from)}`);
 
-        // Thank you and feedback request with stars
-        const keyboard = {
+        const feedbackKeyboard = {
           inline_keyboard: [[1,2,3,4,5].map(star => ({ text: '⭐'.repeat(star), callback_data: `feedback_${orderNumber}_${star}` }))]
         };
-        await sendTelegramMessage(userId, 'Thanks for ordering! Please rate your delivery experience:', keyboard);
+        await sendTelegramMessage(userId, 'Thanks for ordering! Please rate your delivery experience:', feedbackKeyboard);
 
-        // Move order from active to completed
         activeOrders.delete(orderNumber);
         completedOrders.unshift(order);
 
@@ -525,34 +547,85 @@ Deno.serve(async (req) => {
         return new Response('OK', { headers: corsHeaders });
       }
 
-      // Feedback star rating handler
       if(data.startsWith('feedback_')){
         const parts = data.split('_');
         const orderNumber = parts[1];
         const stars = parseInt(parts[2]);
         if(!stars || stars < 1 || stars > 5){
-          await answerCallbackQuery(callbackQueryId, 'Invalid rating.', true);
+          await answerCallbackQuery(callbackQueryId, 'Invalid rating', true);
           return new Response('OK', { headers: corsHeaders });
         }
-        await sendTelegramMessage(userId,
-          `You rated delivery ${stars} star${stars > 1 ? 's' : ''}. Please send feedback comments or type /skip to finish.`);
+        await sendTelegramMessage(userId, `You rated delivery ${stars} star${stars>1?'s':''}. Please send feedback comments or type /skip to finish.`);
         feedbackSessions.set(userId, orderNumber);
         feedbackNotesWaiting.set(userId, orderNumber);
         await answerCallbackQuery(callbackQueryId);
         return new Response('OK', { headers: corsHeaders });
       }
 
-      // ... Add more admin button handlers if needed ...
-
-      // Else just answer quickly callback query to avoid timeout
+      // Unknown callback - just answer to prevent timeout
       await answerCallbackQuery(callbackQueryId);
       return new Response('OK', { headers: corsHeaders });
     }
 
     return new Response('OK', { headers: corsHeaders });
-
-  } catch (err) {
-    console.error('Error processing webhook:', err);
+  } catch (e) {
+    console.error('Error processing update:', e);
     return new Response('Internal Server Error', { status: 500, headers: corsHeaders });
   }
 });
+
+// Admin helper functions used in callback handler:
+async function startOrderCreation(chatId, userId) {
+  const orderNumber = generateOrderNumber();
+  const orderData = {
+    orderNumber,
+    customerId: null,
+    location: null,
+    payment: PAYMENT_TYPES.PAID,
+    notes: '',
+    status: ORDER_STATUS.CREATED,
+    driverId: null,
+    adminId: userId,
+    timestamps: { created: new Date() },
+    waitingFor: null,
+    editMessageId: null,
+  };
+  activeOrders.set(orderNumber, orderData);
+  const keyboard = orderEditKeyboard(orderData);
+  const text = renderOrderDetails(orderData, 'Creating Order');
+  const sent = await sendTelegramMessage(chatId, text, keyboard, true);
+  orderData.editMessageId = sent.result.message_id;
+}
+async function showActiveOrders(chatId) {
+  if (activeOrders.size === 0) {
+    await sendTelegramMessage(chatId, '📋 No active orders.');
+    return;
+  }
+  let text = `<b>Active Orders (${activeOrders.size}):</b>\n\n`;
+  for (const order of activeOrders.values()) {
+    text += `📦 #${order.orderNumber} - <b>${order.status}</b>\n` +
+      `👤 Customer ID: <code>${order.customerId}</code>\n` +
+      `📍 Location: ${escapeHTML(order.location)}\n\n`;
+  }
+  await sendTelegramMessage(chatId, text);
+}
+async function showConnectedDrivers(chatId) {
+  if (connectedDrivers.size === 0) {
+    await sendTelegramMessage(chatId, '🚗 No drivers currently connected.');
+    return;
+  }
+  const list = Array.from(connectedDrivers).map(id => `<a href="tg://user?id=${id}">Driver ${id}</a>`).join('\n');
+  await sendTelegramMessage(chatId, `<b>Connected Drivers (${connectedDrivers.size}):</b>\n\n${list}`);
+}
+async function showRecentOrders(chatId) {
+  if (completedOrders.length === 0) {
+    await sendTelegramMessage(chatId, '📊 No recent completed orders.');
+    return;
+  }
+  let text = '<b>Recent Completed Orders:</b>\n\n';
+  for (const order of completedOrders.slice(0, 10)) {
+    text += `📦 #${order.orderNumber} - Completed\n👤 Customer ID: <code>${order.customerId}</code>\n` +
+      `⏰ ${order.timestamps.completed.toLocaleString()}\n\n`;
+  }
+  await sendTelegramMessage(chatId, text);
+}
