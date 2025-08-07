@@ -1,13 +1,12 @@
-// Database-Free Delivery Bot with full admin and driver group support
+// Database-Free Delivery Bot with /tracking command scaffold
 // Run with Deno
 
 const TELEGRAM_BOT_TOKEN = '8300808943:AAEeQsBOOjQ4XhuNNWe40C5c86kIZFMvzZM';
-const DRIVER_GROUP_ID = -2734011708; // Your driver group chat ID
-const ADMIN_USER_IDS = [5186573916]; // Telegram user IDs of admins
+const ADMIN_USER_IDS = [5186573916]; // Admin Telegram user IDs
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
 const activeOrders = new Map();
@@ -19,13 +18,13 @@ const ORDER_STATUS = {
   ASSIGNED: 'assigned',
   PICKED_UP: 'picked_up',
   ARRIVED: 'arrived',
-  COMPLETED: 'completed'
+  COMPLETED: 'completed',
 };
 
 const PAYMENT_TYPES = {
   CASH: 'cash',
   QRCODE: 'qrcode',
-  PAID: 'paid'
+  PAID: 'paid',
 };
 
 let orderCounter = 1;
@@ -40,10 +39,15 @@ function generateOrderNumber() {
 
 async function sendTelegramMessage(chatId, text, replyMarkup = null, disableWebPagePreview = false) {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-  const body = { chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: disableWebPagePreview };
+  const body = {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    disable_web_page_preview: disableWebPagePreview,
+  };
   if (replyMarkup) body.reply_markup = replyMarkup;
   const resp = await fetch(url, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
   if (!resp.ok) console.error('Telegram sendMessage error:', await resp.text());
   return resp.json();
@@ -51,10 +55,16 @@ async function sendTelegramMessage(chatId, text, replyMarkup = null, disableWebP
 
 async function editMessageText(chatId, messageId, text, replyMarkup = null, disableWebPagePreview = false) {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`;
-  const body = { chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML', disable_web_page_preview: disableWebPagePreview };
+  const body = {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    parse_mode: 'HTML',
+    disable_web_page_preview: disableWebPagePreview,
+  };
   if (replyMarkup) body.reply_markup = replyMarkup;
   const resp = await fetch(url, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
   return resp.json();
 }
@@ -63,7 +73,7 @@ async function answerCallbackQuery(callbackQueryId, text = '', showAlert = false
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/answerCallbackQuery`;
   await fetch(url, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ callback_query_id: callbackQueryId, text, show_alert: showAlert })
+    body: JSON.stringify({ callback_query_id: callbackQueryId, text, show_alert: showAlert }),
   });
 }
 
@@ -88,8 +98,8 @@ function adminMainMenuKeyboard() {
       [{ text: '📦 Create New Order', callback_data: 'admin_create_order' }],
       [{ text: '📋 Active Orders', callback_data: 'admin_active_orders' }],
       [{ text: '🚗 Connected Drivers', callback_data: 'admin_connected_drivers' }],
-      [{ text: '📊 Recent Orders', callback_data: 'admin_recent_orders' }]
-    ]
+      [{ text: '📊 Recent Orders', callback_data: 'admin_recent_orders' }],
+    ],
   };
 }
 
@@ -101,18 +111,8 @@ function orderEditKeyboard(order) {
       [{ text: `💳 Payment: ${order.payment.charAt(0).toUpperCase() + order.payment.slice(1)}`, callback_data: `edit_payment_${order.orderNumber}` }],
       [{ text: '📝 Add Notes', callback_data: `edit_notes_${order.orderNumber}` }],
       [{ text: '✅ Create Order', callback_data: `confirm_order_${order.orderNumber}` }],
-      [{ text: '❌ Cancel', callback_data: `cancel_order_${order.orderNumber}` }]
-    ]
-  };
-}
-
-function driverStatusKeyboard(userId) {
-  const isConnected = connectedDrivers.has(userId);
-  return {
-    inline_keyboard: [[{
-      text: isConnected ? '❌ Disconnect' : '✅ Connect',
-      callback_data: isConnected ? 'driver_disconnect' : 'driver_connect'
-    }]]
+      [{ text: '❌ Cancel', callback_data: `cancel_order_${order.orderNumber}` }],
+    ],
   };
 }
 
@@ -136,7 +136,9 @@ async function showActiveOrders(chatId) {
   }
   let text = `<b>Active Orders (${orders.length}):</b>\n\n`;
   for (const o of orders) {
-    text += `📦 #${o.orderNumber} - <b>${o.status}</b>\n` + `👤 Customer ID: <code>${o.customerId}</code>\n` + `📍 Location: ${o.location}\n\n`;
+    text += `📦 #${o.orderNumber} - <b>${o.status}</b>\n` +
+      `👤 Customer ID: <code>${o.customerId}</code>\n` +
+      `📍 Location: ${o.location}\n\n`;
   }
   await sendTelegramMessage(chatId, text);
 }
@@ -149,7 +151,8 @@ async function showRecentOrders(chatId) {
   }
   let text = '<b>Recent Completed Orders:</b>\n\n';
   for (const o of recent) {
-    text += `📦 #${o.orderNumber} - Completed\n👤 Customer ID: <code>${o.customerId}</code>\n` + `⏰ ${o.timestamps.completed.toLocaleString()}\n\n`;
+    text += `📦 #${o.orderNumber} - Completed\n👤 Customer ID: <code>${o.customerId}</code>\n` +
+      `⏰ ${o.timestamps.completed.toLocaleString()}\n\n`;
   }
   await sendTelegramMessage(chatId, text);
 }
@@ -176,7 +179,7 @@ async function startOrderCreation(chatId, userId) {
     adminId: userId,
     timestamps: { created: new Date() },
     waitingFor: null,
-    editMessageId: null
+    editMessageId: null,
   };
   activeOrders.set(orderNumber, orderData);
   const keyboard = orderEditKeyboard(orderData);
@@ -204,8 +207,8 @@ async function handleOrderEdit(action, orderNumber, chatId, userId, messageId) {
           [{ text: 'Cash', callback_data: `set_payment_${orderNumber}_cash` }],
           [{ text: 'QR Code', callback_data: `set_payment_${orderNumber}_qrcode` }],
           [{ text: 'Paid', callback_data: `set_payment_${orderNumber}_paid` }],
-          [{ text: '🔙 Back', callback_data: `back_order_${orderNumber}` }]
-        ]
+          [{ text: '🔙 Back', callback_data: `back_order_${orderNumber}` }],
+        ],
       };
       await editMessageText(chatId, messageId, `💳 <b>Select Payment Method for Order #${orderNumber}:</b>`, keyboard, true);
       break;
@@ -240,8 +243,8 @@ async function confirmOrder(orderNumber, chatId, messageId) {
   const keyboard = {
     inline_keyboard: Array.from(connectedDrivers).map(driverId => [{
       text: `🚗 Driver ${driverId}`,
-      callback_data: `assign_driver_${orderNumber}_${driverId}`
-    }]).concat([[{ text: '🔙 Back to Edit', callback_data: `back_order_${orderNumber}` }]])
+      callback_data: `assign_driver_${orderNumber}_${driverId}`,
+    }]).concat([[{ text: '🔙 Back to Edit', callback_data: `back_order_${orderNumber}` }]]),
   };
   const text =
     `🚗 <b>Select Driver for Order #${orderNumber}:</b>\n\n` +
@@ -289,47 +292,11 @@ async function cancelOrder(orderNumber, chatId, messageId) {
   await editMessageText(chatId, messageId, `❌ Order #${orderNumber} cancelled.`);
 }
 
-async function handleDriverGroupMessage(message) {
-  const chatId = message.chat.id;
-  const userId = message.from.id;
-  const text = (message.text || '').toLowerCase().trim();
-
-  if (chatId !== DRIVER_GROUP_ID) return;
-
-  const isConnected = connectedDrivers.has(userId);
-  const keyboard = driverStatusKeyboard(userId);
-
-  if (text === '/start' || text === '/status') {
-    await sendTelegramMessage(chatId, isConnected ? '🚗 You are currently connected.' : '🚗 You are currently disconnected.', keyboard);
-    return;
-  }
-
-  if (text === '/connect') {
-    if (isConnected) {
-      await sendTelegramMessage(chatId, '🚗 You are already connected.', keyboard);
-      return;
-    }
-    connectedDrivers.add(userId);
-    await sendTelegramMessage(chatId, '✅ You are now connected as a driver.', keyboard);
-    for (const adminId of ADMIN_USER_IDS) {
-      await sendTelegramMessage(adminId, `🚗 Driver ${userId} connected.`);
-    }
-    return;
-  }
-
-  if (text === '/disconnect') {
-    if (!isConnected) {
-      await sendTelegramMessage(chatId, 'ℹ️ You were not connected.', keyboard);
-      return;
-    }
-    connectedDrivers.delete(userId);
-    await sendTelegramMessage(chatId, '✅ You are now disconnected.', keyboard);
-    for (const adminId of ADMIN_USER_IDS) {
-      await sendTelegramMessage(adminId, `🚗 Driver ${userId} disconnected.`);
-    }
-    return;
-  }
-}
+//
+// === New tracking feature ===
+// Keeps track of users waiting for tracking order number input
+//
+const trackingSessions = new Map(); // userId => true if waiting input
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
@@ -342,26 +309,64 @@ Deno.serve(async (req) => {
       const message = update.message;
       const chatId = message.chat.id;
       const userId = message.from.id;
-      const text = message.text || '';
+      const textRaw = message.text || '';
+      const text = textRaw.trim();
 
-      if (chatId === DRIVER_GROUP_ID) {
-        await handleDriverGroupMessage(message);
-        return new Response('OK', { headers: corsHeaders });
+      // DRIVER commands in private chat
+      if (chatId > 0 && !isAdmin(userId)) {
+        const textLower = text.toLowerCase();
+
+        if (textLower === '/connect') {
+          if (connectedDrivers.has(userId)) {
+            await sendTelegramMessage(chatId, '🚗 You are already connected as a driver.');
+          } else {
+            connectedDrivers.add(userId);
+            await sendTelegramMessage(chatId, '✅ You are now connected as a driver.');
+            for (const adminId of ADMIN_USER_IDS) {
+              await sendTelegramMessage(adminId, `🚗 Driver ${userId} connected.`);
+            }
+          }
+          return new Response('OK', { headers: corsHeaders });
+        }
+
+        if (textLower === '/disconnect') {
+          if (!connectedDrivers.has(userId)) {
+            await sendTelegramMessage(chatId, 'ℹ️ You were not connected.');
+          } else {
+            connectedDrivers.delete(userId);
+            await sendTelegramMessage(chatId, '✅ You are now disconnected.');
+            for (const adminId of ADMIN_USER_IDS) {
+              await sendTelegramMessage(adminId, `🚗 Driver ${userId} disconnected.`);
+            }
+          }
+          return new Response('OK', { headers: corsHeaders });
+        }
+
+        if (textLower === '/status') {
+          const status = connectedDrivers.has(userId) ? '✅ You are connected.' : '❌ You are disconnected.';
+          await sendTelegramMessage(chatId, `🚗 Driver status: ${status}`);
+          return new Response('OK', { headers: corsHeaders });
+        }
       }
 
+      // ADMIN commands
       if (isAdmin(userId)) {
-        if (text.trim() === '/start') {
+        if (text.toLowerCase() === '/start') {
           await showAdminMenu(chatId);
           return new Response('OK', { headers: corsHeaders });
         }
 
-        // Forwarded message for order creation
-        if (message.forward_from && message.forward_from.id !== userId) {
+        // Forwarded message triggers order creation
+        if (
+          message.forward_from &&
+          message.forward_from.id !== userId &&
+          chatId > 0
+        ) {
           const customerUser = message.forward_from;
           const customerId = customerUser.id;
 
-          const lines = text.trim().split('\n');
-          let location = lines[0];
+          const lines = text.split('\n');
+          let location = lines[0].trim();
           let notes = '';
           if (lines.length > 1) notes = lines.slice(1).join('\n').trim();
 
@@ -377,12 +382,13 @@ Deno.serve(async (req) => {
             adminId: userId,
             timestamps: { created: new Date() },
             waitingFor: null,
-            editMessageId: null
+            editMessageId: null,
           };
 
           activeOrders.set(orderNumber, newOrder);
 
-          const orderText = `📦 <b>New Order Draft #${orderNumber}</b>\n\n` +
+          const orderText =
+            `📦 <b>New Order Draft #${orderNumber}</b>\n\n` +
             `👤 Customer: ${tgUserLink(customerUser)}\n` +
             `📍 Location: ${location}\n` +
             (notes ? `📝 Notes: ${notes}\n` : '') +
@@ -391,8 +397,8 @@ Deno.serve(async (req) => {
           const keyboard = {
             inline_keyboard: [
               [{ text: '💳 Set Payment', callback_data: `edit_payment_${orderNumber}` }],
-              [{ text: '✅ Create Order', callback_data: `confirm_order_${orderNumber}` }]
-            ]
+              [{ text: '✅ Create Order', callback_data: `confirm_order_${orderNumber}` }],
+            ],
           };
 
           const sent = await sendTelegramMessage(chatId, orderText, keyboard, true);
@@ -401,7 +407,7 @@ Deno.serve(async (req) => {
           return new Response('OK', { headers: corsHeaders });
         }
 
-        // Admin input for waitingFor fields
+        // Admin inputs for waitingFor fields
         for (const [orderNumber, order] of activeOrders.entries()) {
           if (order.adminId === userId && order.waitingFor) {
             switch (order.waitingFor) {
@@ -416,9 +422,53 @@ Deno.serve(async (req) => {
         }
       }
 
+      //
+      // === TRACKING COMMAND HANDLING ===
+      //
+      // If user is waiting for tracking order number input:
+      if (trackingSessions.has(userId)) {
+        const orderNumberInput = text.trim();
+        trackingSessions.delete(userId);
+
+        // TODO: Implement actual tracking logic; here placeholder response
+        // For now, check if order exists in activeOrders or completedOrders:
+        let order = activeOrders.get(orderNumberInput);
+        if (!order) {
+          order = completedOrders.find(o => o.orderNumber === orderNumberInput);
+        }
+
+        if (!order) {
+          await sendTelegramMessage(chatId, `❌ Order #${orderNumberInput} not found. Please try again.`);
+          return new Response('OK', { headers: corsHeaders });
+        }
+
+        // Build simple status message, you can customize or extend later:
+        let statusText = `📦 <b>Order #${order.orderNumber} Status</b>\n\n` +
+          `👤 Customer ID: <code>${order.customerId}</code>\n` +
+          `📍 Location: ${order.location}\n` +
+          `💳 Payment: ${order.payment.charAt(0).toUpperCase() + order.payment.slice(1)}\n` +
+          `📝 Notes: ${order.notes || ''}\n` +
+          `📊 Status: <b>${order.status}</b>\n`;
+
+        if (order.timestamps.assigned && order.driverId) {
+          statusText += `🚗 Assigned driver: <code>${order.driverId}</code>\n`;
+        }
+
+        await sendTelegramMessage(chatId, statusText);
+        return new Response('OK', { headers: corsHeaders });
+      }
+
+      // /tracking command starts tracking session
+      if (text.toLowerCase() === '/tracking') {
+        await sendTelegramMessage(chatId, '🔎 Please enter your order number to track:');
+        trackingSessions.set(userId, true);
+        return new Response('OK', { headers: corsHeaders });
+      }
+
       return new Response('OK', { headers: corsHeaders });
     }
 
+    // CALLBACK QUERY HANDLING
     if (update.callback_query) {
       const data = update.callback_query.data;
       const callbackQueryId = update.callback_query.id;
@@ -427,35 +477,8 @@ Deno.serve(async (req) => {
       const chatId = message.chat.id;
       const messageId = message.message_id;
 
-      if (chatId === DRIVER_GROUP_ID) {
-        if (data === 'driver_connect') {
-          if (!connectedDrivers.has(userId)) {
-            connectedDrivers.add(userId);
-            await sendTelegramMessage(chatId, '✅ You are now connected.', driverStatusKeyboard(userId));
-            for (const adminId of ADMIN_USER_IDS) {
-              await sendTelegramMessage(adminId, `🚗 Driver ${userId} connected.`);
-            }
-          } else {
-            await sendTelegramMessage(chatId, '🚗 You are already connected.', driverStatusKeyboard(userId));
-          }
-          await answerCallbackQuery(callbackQueryId);
-          return new Response('OK', { headers: corsHeaders });
-        }
-        if (data === 'driver_disconnect') {
-          if (connectedDrivers.delete(userId)) {
-            await sendTelegramMessage(chatId, '✅ You are now disconnected.', driverStatusKeyboard(userId));
-            for (const adminId of ADMIN_USER_IDS) {
-              await sendTelegramMessage(adminId, `🚗 Driver ${userId} disconnected.`);
-            }
-          } else {
-            await sendTelegramMessage(chatId, 'ℹ️ You were not connected.', driverStatusKeyboard(userId));
-          }
-          await answerCallbackQuery(callbackQueryId);
-          return new Response('OK', { headers: corsHeaders });
-        }
-      }
-
       if (!isAdmin(userId)) {
+        // Non-admin callback queries - no special actions required now
         await answerCallbackQuery(callbackQueryId, 'Unauthorized', true);
         return new Response('OK', { headers: corsHeaders });
       }
@@ -518,6 +541,7 @@ Deno.serve(async (req) => {
         default:
           await answerCallbackQuery(callbackQueryId);
       }
+
       return new Response('OK', { headers: corsHeaders });
     }
 
