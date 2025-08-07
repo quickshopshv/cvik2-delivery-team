@@ -2,7 +2,7 @@
 // Adjusted and debugged last full version (after your last feedback)
 // Run with Deno
 
-const TELEGRAM_BOT_TOKEN = 'YOUR_BOT_TOKEN_HERE';
+const TELEGRAM_BOT_TOKEN = '8300808943:AAEeQsBOOjQ4XhuNNWe40C5c86kIZFMvzZM';
 const ADMIN_USER_IDS = [5186573916];
 
 const corsHeaders = {
